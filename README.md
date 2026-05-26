@@ -44,10 +44,37 @@ anima-lora-dataset/
 
 每个脚本只修改自己的列，不破坏其他列。
 
-### 0. 环境准备
+### 0. 创建数据集 & 环境准备
+
+每个画风格一个数据集目录，需要手动创建：
 
 ```bash
+# 1. 克隆仓库后，创建 datasets/ 根目录
+mkdir -p datasets
+
+# 2. 创建具体数据集目录（每个画风一个）
+mkdir -p datasets/<dataset>/raw
+
+# 3. 将原始图片放入 raw/
+# （图片会自动编号复制到 images/）
+
+# 4. 激活环境
 source venv/bin/activate
+pip install -r requirements.txt
+```
+
+目录结构示例：
+
+```
+datasets/
+├── cierra/              # 画师 cierra 的数据集
+│   ├── raw/             # ← 放你的原始图片
+│   ├── images/          # ← 自动生成
+│   ├── images_audited/  # ← 自动生成
+│   ├── captions/        # ← 自动生成
+│   └── merged/          # ← 自动生成
+└── <另一个画风>/
+    └── raw/
 ```
 
 ### 1. 图片摄入
