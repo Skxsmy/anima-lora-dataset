@@ -39,23 +39,20 @@ def main():
     raw_dir = dataset_dir / 'raw'
     images_dir = dataset_dir / 'images'
 
-    # 检查 raw/ 目录
-    if not raw_dir.exists():
-        print(f"[错误] raw/ 目录不存在: {raw_dir}")
-        print(f"请先创建 {raw_dir} 并放入原始图片")
-        sys.exit(1)
+    # 自动创建 raw/ + images/ 目录
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
 
+    # 检查 raw/ 是否为空
     raw_files = sorted(
         [f for f in raw_dir.iterdir() if f.is_file()],
         key=lambda p: p.name
     )
     if not raw_files:
-        print(f"[警告] raw/ 目录为空: {raw_dir}")
-        print("请放入图片后重新运行")
+        print(f"[提示] 数据集 '{args.dataset}' 已创建")
+        print(f"       目录: {raw_dir}")
+        print(f"请将原始图片放入 {raw_dir} 后重新运行")
         sys.exit(0)
-
-    # 创建 images/ 目录
-    images_dir.mkdir(parents=True, exist_ok=True)
 
     # 确定起始编号（从已有文件的最大编号继续）
     existing = sorted(
