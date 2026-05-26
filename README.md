@@ -1,181 +1,111 @@
 # Anima LoRA 数据集准备管道
 
-画师画风 LoRA 的端到端数据集准备工具链。工具层与数据层分离，支持多个角色/画风数据集。
+画师画风 LoRA 的训练数据准备工具。从原始图片到可直接训练的 `merged/` 目录，一条龙。
 
-## 项目结构
+## 一次完整的工作流长什么样
 
-```
-anima-lora-dataset/
-├── scripts/                         # 工具脚本
-│   ├── process_raw.py               # 1. 图片摄入与编号
-│   ├── tag_images.py                # 2. PixAi 自动打标
-│   ├── audit_batch.py               # 3. LLM 审计清理标签
-│   ├── caption.py                   # 4. 句子 Caption 生成
-│   ├── merge_tags_captions.py       # 5. 合成 tags + caption → merged/
-│   └── lib/
-│       └── log_utils.py             # 共享日志工具（所有脚本共用）
-├── prompts/                         # LLM prompt 模板
-│   ├── tagger_audit_prompt.md       # 标签审计 prompt
-│   └── caption_prompt.md            # 句子 Caption 生成 prompt
-├── datasets/                        # 数据层：每个画风一个子目录
-│   └── <dataset>/
-│       ├── raw/                     # 原始待处理图片（第一步用）
-│       ├── images/                  # 训练图片 + PixAi 输出的 .txt 标签
-│       ├── images_audited/          # LLM 审计清理后的标签
-│       ├── captions/                # 生成的句子 caption
-│       └── merged/                  # 合成后的训练数据（tags + caption + 图片）
-├── logs/                            # 统一日志（所有处理阶段共用）
-│   └── audit_<dataset>.csv
-├── venv/                            # Python 虚拟环境
-└── requirements.txt                 # 依赖
-```
-
-## 工作流
-
-所有脚本共用一份日志文件 `logs/audit_<dataset>.csv`，每列对应一个处理阶段：
-
-| 列 | 写入者 | 作用 |
-|---|---|---|
-| `original_count` / `new_count` | audit_batch | 标签数统计 |
-| `needs_reaudit` | audit_batch | 标记需要重新审计的图片 |
-| `caption_length` | caption | 生成的 caption 词数 |
-| `needs_caption` / `needs_recaption` | caption | 标记需要生成/重新生成 caption |
-| `merged` | merge_tags_captions | 标记是否已合成 |
-
-每个脚本只修改自己的列，不破坏其他列。
-
-### 0. 创建数据集 & 环境准备
-
-每个画风格一个数据集目录。运行 `process_raw.py` 会自动创建目录结构：
+以 cierra 画师为例（cierra-rabit 是自定义触发词）：
 
 ```bash
-# 1. 创建新数据集（自动生成 datasets/<dataset>/raw/ + images/）
-python scripts/process_raw.py --dataset <dataset>
+# 1. 把图片丢进去就行
+python scripts/process_raw.py --dataset cierra
 
-# 2. 按提示将原始图片放入 raw/，然后再次运行
-python scripts/process_raw.py --dataset <dataset>
+# 2. 自动打标（PixAi 识别画面内容，生成 Danbooru 标签）
+python scripts/tag_images.py --dataset cierra --trigger "cierra-rabit"
 
-# 3. 激活环境
+# 3. LLM 清理标签（去掉画师名、角色名、质量词、过细零件等）
+python scripts/audit_batch.py --dataset cierra
+
+# 4. 生成自然语言描述（给每张图写一句英文 caption）
+python scripts/caption.py --dataset cierra
+
+# 5. 合成最终训练数据
+python scripts/merge_tags_captions.py --dataset cierra
+```
+
+## 每步在做什么
+
+### 1. 图片摄入 — `process_raw.py`
+
+把原始图片丢进 `datasets/<画风>/` 目录里，脚本会自动把它们挪到 `raw/`、编号复制到 `images/`。
+
+```
+datasets/<画风>/           ← 你把图片丢这
+├── raw/                   ← 原始文件存档（自动创建）
+└── images/                ← 编号后的训练图片（自动创建）
+    ├── 000001.jpg
+    ├── 000002.jpg
+    └── ...
+```
+
+### 2. PixAi 打标 — `tag_images.py`
+
+对每张图跑 PixAi Tagger，识别画面中的元素、动作、场景，输出 Danbooru 格式标签。每个 `.jpg` 旁边生成一个同名的 `.txt`。
+
+```
+@cierra-rabit, 1girl, solo, upper_body, looking_at_viewer, bedroom, sitting, window_light
+```
+
+### 3. LLM 审计 — `audit_batch.py`
+
+自动标签里有很多不该出现在画风 LoRA 里的东西。LLM 会检查每张图的实际画面，把下面这些清理掉：
+
+- 真实画师名（让自定义触发词专心绑定画风）
+- 具体角色名（不要让画风绑定到特定人物）
+- 作品/系列名
+- 质量词（masterpiece、best quality 等）
+- 平台水印、签名、文字残留
+- 过细的服装零件和身体部位
+- 明显识别错误的标签
+
+留下的：主体、人数、构图、动作、场景、明显的服装大类、光照。
+
+### 4. 句子 Caption — `caption.py`
+
+为每张图生成一句自然语言英文描述，描述画面中实际看到的内容。不写 "The image shows" 这类引导语，不谈剧情，不堆风格词。
+
+```
+Two blonde girls sit together against a white background. The girl on the left has blue eyes and wears a white dress with a red bow and frills, looking forward.
+```
+
+### 5. 合成训练数据 — `merge_tags_captions.py`
+
+把清理后的标签和句子 caption 合并为一行，同时复制图片到 `merged/`。这个目录里的内容可以直接喂给训练脚本。
+
+```
+@cierra-rabit, 2girls, cowboy_shot, sitting, looking_at_another, blonde_hair, long_hair.
+Two blonde girls sit together against a white background.
+```
+
+## 日志
+
+所有步骤共用一份日志 `logs/audit_<画风>.csv`，每列对应一个处理阶段。跑完之后可以快速查看哪些图片需要重跑：
+
+```bash
+# 查看有多少图还没 caption
+grep -c "needs_caption,true" logs/audit_cierra.csv
+
+# 查看 caption 长度异常的图（过短）
+awk -F, '$10 < 20 && $10 > 0' logs/audit_cierra.csv
+```
+
+## 从头开始一个新数据集
+
+```bash
+# 1. 激活环境
 source venv/bin/activate
-pip install -r requirements.txt
+
+# 2. 丢图片进去
+python scripts/process_raw.py --dataset 新画风
+# → 提示"没有图片"，脚本已经建好目录了
+# → 把图片复制到 datasets/新画风/ 里
+# → 再跑一次 process_raw.py
+
+# 3. 触发词随意定，建议不要用真实画师名
+python scripts/tag_images.py --dataset 新画风 --trigger "my_trigger"
+
+# 4-6. 同上
+python scripts/audit_batch.py --dataset 新画风
+python scripts/caption.py --dataset 新画风
+python scripts/merge_tags_captions.py --dataset 新画风
 ```
-
-执行后目录结构：
-
-```
-datasets/
-├── <dataset>/             # 画风数据集
-│   ├── raw/               # ← 放你的原始图片
-│   ├── images/            # ← 自动生成（编号后的图片）
-│   ├── images_audited/    # ← 自动生成
-│   ├── captions/          # ← 自动生成
-│   └── merged/            # ← 自动生成
-└── ...
-```
-
-### 1. 图片摄入
-
-将原始图片放入 `datasets/<dataset>/raw/`，然后运行：
-
-```bash
-python scripts/process_raw.py --dataset <dataset>
-```
-
-自动验证图片完整性，按 `000001.jpg` 格式统一编号复制到 `images/`，并生成 `mapping.csv`。
-
-### 2. PixAi 自动打标
-
-```bash
-python scripts/tag_images.py --dataset <dataset> --trigger "<trigger>"
-```
-
-对 `images/` 中的每张图片调用 PixAi Tagger 生成 Danbooru 标签，写入 `images/*.txt`。
-
-参数：
-- `--trigger`：画风触发词（如 `cierra-rabit`），自动加 `@` 前缀
-
-### 3. LLM 审计清理标签
-
-```bash
-# 首次运行（处理全部）
-python scripts/audit_batch.py --dataset <dataset>
-
-# 增量：只跑指定范围
-python scripts/audit_batch.py --dataset <dataset> --start-from 50 --limit 10
-
-# 强制重跑特定图片（先标记 needs_reaudit=true，再运行）
-python scripts/audit_batch.py --dataset <dataset>
-```
-
-清理规则：
-- 修正人物数量标签（`1girl`/`solo`/`2girls` 等）
-- 删除真实画师名、角色名、作品名
-- 删除质量词、平台残留、水印签名
-- 删除过细的身体部位和服装零件
-- 删除明显错误的标签
-- 保留主体、人数、构图、动作、场景、明显光照
-
-输出写入 `images_audited/*.txt`。
-
-### 4. 句子 Caption 生成
-
-```bash
-# 生成全部
-python scripts/caption.py --dataset <dataset>
-
-# 只测几张
-python scripts/caption.py --dataset <dataset> --start-from 1 --limit 3
-
-# 重跑特定图片（先标记 needs_recaption=true，再运行）
-python scripts/caption.py --dataset <dataset>
-```
-
-生成规则见 `prompts/caption_prompt.md` 和 `# 句子 Caption 编写原则：画师画风 LoRA 版本.md`。
-
-输出写入 `captions/*.txt`。
-
-### 5. 合成训练数据
-
-```bash
-python scripts/merge_tags_captions.py --dataset <dataset>
-```
-
-将审计后标签和句子 caption 合并为一行，同时复制图片到 `merged/`。
-
-合并格式：
-
-```
-@trigger, tag1, tag2, tag3. Natural language caption sentence.
-```
-
-示例：
-
-```
-@cierra-rabit, 2girls, cowboy_shot, sitting, looking_at_another, blonde_hair, long_hair. Two blonde girls sit together against a white background, with the girl on the left looking forward and the girl on the right looking at her with a smile.
-```
-
-输出到 `merged/`：每张图一个 `.txt` + 图片副本，可直接用于训练。
-
-## 日志管理
-
-日志文件 `logs/audit_<dataset>.csv` 记录所有处理阶段的进度。
-
-```bash
-# 查看处理进度
-python3 -c "
-import csv
-from pathlib import Path
-log = Path('logs/audit_<dataset>.csv')
-reader = csv.DictReader(log.read_text().splitlines())
-rows = list(reader)
-print(f'总数: {len(rows)}')
-print(f'需审计: {sum(1 for r in rows if r[\"needs_reaudit\"]==\"true\")}')
-print(f'需 caption: {sum(1 for r in rows if r[\"needs_caption\"]==\"true\")}')
-print(f'已合并: {sum(1 for r in rows if r[\"merged\"]==\"true\")}')
-"
-```
-
-## 参考文档
-
-- `Tagger 输出后处理原则：画师画风 LoRA.md` — 标签后处理规范
-- `# 句子 Caption 编写原则：画师画风 LoRA 版本.md` — 句子 Caption 规范

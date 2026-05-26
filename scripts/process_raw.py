@@ -36,22 +36,34 @@ def main():
     args = parser.parse_args()
 
     dataset_dir = PROJECT_ROOT / 'datasets' / args.dataset
+    dataset_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = dataset_dir / 'raw'
     images_dir = dataset_dir / 'images'
 
-    # 自动创建 raw/ + images/ 目录
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    # 扫描数据集根目录下的松散图片（不在子文件夹中的）
+    loose_images = sorted(
+        [f for f in dataset_dir.iterdir()
+         if f.is_file() and f.suffix.lower() in SUPPORTED_EXT],
+        key=lambda p: p.name
+    )
+    if loose_images:
+        # 有松散图片：移入 raw/ 统一管理
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        print(f"发现 {len(loose_images)} 张图片在数据集根目录，正在移入 raw/...")
+        for f in loose_images:
+            f.rename(raw_dir / f.name)
+            print(f"  {f.name} → raw/{f.name}")
+
+    # 创建 images/ 目录
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    # 检查 raw/ 是否为空
+    # 从 raw/ 读取图片
     raw_files = sorted(
-        [f for f in raw_dir.iterdir() if f.is_file()],
+        [f for f in raw_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXT],
         key=lambda p: p.name
     )
     if not raw_files:
-        print(f"[提示] 数据集 '{args.dataset}' 已创建")
-        print(f"       目录: {raw_dir}")
-        print(f"请将原始图片放入 {raw_dir} 后重新运行")
+        print(f"没有图片需要处理。将原始图片放入 {dataset_dir} 后重新运行。")
         sys.exit(0)
 
     # 确定起始编号（从已有文件的最大编号继续）
