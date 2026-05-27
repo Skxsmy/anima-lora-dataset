@@ -25,7 +25,7 @@ from pathlib import Path
 
 # 共享日志工具
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.log_utils import load_log, write_log, LOG_COLS
+from lib.log_utils import load_log, write_log
 
 SUPPORTED_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 
@@ -98,7 +98,6 @@ def main():
             print(f"  ⏭️  {stem} — 缺少 caption 文件")
             entry.update({
                 'timestamp': datetime.now().isoformat(),
-                'status': 'failed',
                 'error': 'missing caption',
                 'merged': 'false',
             })
@@ -110,7 +109,6 @@ def main():
             print(f"  ⏭️  {stem} — caption 为空")
             entry.update({
                 'timestamp': datetime.now().isoformat(),
-                'status': 'failed',
                 'error': 'empty caption',
                 'merged': 'false',
             })
@@ -136,7 +134,6 @@ def main():
         entry.update({
             'image': img_filename,
             'timestamp': datetime.now().isoformat(),
-            'status': 'success',
             'error': '',
             'merged': 'true',
         })
