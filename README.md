@@ -106,25 +106,55 @@ awk -F, '$11 < 20 && $11 > 0' logs/audit_cierra.csv
 
 ## 从头开始一个新数据集
 
+### 环境准备（仅第一次）
+
 ```bash
-# 1. 激活环境
+# 1. 创建虚拟环境
+python3 -m venv venv
 source venv/bin/activate
 
-# 2. 丢图片进去
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 下载模型文件（二选一，PixAi Tagger 必须）
+pip install huggingface-hub
+huggingface-cli download 1038lab/pixai-tagger \
+    pixai-tagger_v0.9.safetensors tags_v0.9_13k.json \
+    --local-dir models/PixelAI_tagger/
+
+# OppaiOracle 是可选的补充 tagger
+# huggingface-cli download Grio43/OppaiOracle \
+#     V1.1_onnx/model.onnx selected_tags.csv \
+#     --local-dir models/OppaiOracle/
+
+# 4. 配置 API Key
+cp .env.example .env
+# 编辑 .env，填入你的 OpenRouter API Key
+# 从 https://openrouter.ai/keys 获取
+```
+
+### 处理数据集
+
+```bash
+# 1. 丢图片进去
 python scripts/process_raw.py --dataset 新画风
 # → 提示"没有图片"，脚本已经建好目录了
 # → 把图片复制到 datasets/新画风/ 里
 # → 再跑一次 process_raw.py
 
-# 3. 检查分辨率（超大图缩到 1024px）
+# 2. 检查分辨率（超大图缩到 1024px）
 python scripts/check_resolution.py --dataset 新画风
 python scripts/check_resolution.py --dataset 新画风 --apply
 
-# 4. 触发词随意定，建议不要用真实画师名
+# 3. 自动打标
 python scripts/tag_images.py --dataset 新画风 --trigger "my_trigger"
 
-# 5-7. 同上
+# 4. LLM 审计标签（--mode style 画风 / character 角色）
 python scripts/audit_batch.py --dataset 新画风 --mode style --trigger my_trigger
+
+# 5. 生成句子 caption
 python scripts/caption.py --dataset 新画风 --mode style
+
+# 6. 合成训练数据
 python scripts/merge_tags_captions.py --dataset 新画风
 ```

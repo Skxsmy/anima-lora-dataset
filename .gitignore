@@ -5,6 +5,9 @@ venv/
 # 数据层（各数据集）
 datasets/
 
+# 模型文件（二进制大文件，通过 huggingface-cli 下载）
+models/
+
 # 日志（自动生成）
 logs/
 
