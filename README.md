@@ -92,6 +92,21 @@ Two blonde girls sit together against a white background. The girl on the left h
 Two blonde girls sit together against a white background.
 ```
 
+## API 配置
+
+三个变量通过 `.env` 文件配置（`cp .env.example .env` 后编辑）：
+
+| 变量 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `LLM_API_KEY` | 是 | — | API Key |
+| `LLM_API_BASE` | 否 | `https://openrouter.ai/api/v1` | API 地址（OpenAI 兼容） |
+| `LLM_MODEL` | 否 | `qwen/qwen3.6-35b-a3b` | 模型名称 |
+
+支持任何 OpenAI 兼容接口，例如：
+- OpenRouter：`LLM_API_BASE=https://openrouter.ai/api/v1`
+- OpenAI：`LLM_API_BASE=https://api.openai.com/v1`，`LLM_MODEL=gpt-4o`
+- 本地 vLLM：`LLM_API_BASE=http://localhost:8000/v1`
+
 ## 处理模式（Mode）
 
 `audit_batch.py` 和 `caption.py` 通过 `--mode` 参数切换处理策略。不同模式对应 `prompts/` 下不同的 prompt 文件，决定 LLM 如何处理标签和生成 caption。
