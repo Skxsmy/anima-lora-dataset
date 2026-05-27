@@ -17,3 +17,6 @@ Thumbs.db
 *.pyc
 __pycache__/
 .idea/
+
+# 参考文档（不进入仓库）
+others/
