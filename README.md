@@ -92,6 +92,34 @@ Two blonde girls sit together against a white background. The girl on the left h
 Two blonde girls sit together against a white background.
 ```
 
+## 处理模式（Mode）
+
+`audit_batch.py` 和 `caption.py` 通过 `--mode` 参数切换处理策略。不同模式对应 `prompts/` 下不同的 prompt 文件，决定 LLM 如何处理标签和生成 caption。
+
+### 内置模式
+
+| 模式 | 用途 | 审计重点 | Caption 风格 |
+|------|------|---------|-------------|
+| `style` | 画师画风 LoRA | 删角色名/画师名/作品名，保留构图/场景/光照 | 纯自然语言，不写触发词，不写引导句 |
+| `character` | 人物角色 LoRA | 保留角色核心特征（瞳色/发色/配饰），按图片实际保留发型和服装 | 描述角色特征+外观+姿态+场景，至少 2 句 |
+
+### 添加自定义模式
+
+如果你想训练其他类型的 LoRA（如服装、场景、道具），可以添加自己的模式。只需在 `prompts/` 下创建两个文件：
+
+```
+prompts/tagger_audit_prompt_<mode>.md    ← LLM 审计标签用
+prompts/caption_prompt_<mode>.md         ← LLM 生成 caption 用
+```
+
+**文件命名规则：** `prompts/<脚本基名>_<mode>.md`。`--mode my_mode` 会查找 `tagger_audit_prompt_my_mode.md` 和 `caption_prompt_my_mode.md`。找不到对应文件会直接报错退出。
+
+**编写 prompt 的注意事项：**
+- `audit_batch.py` 期望 LLM 输出**纯逗号分隔标签**（不加触发词、不加解释）
+- `caption.py` 期望 LLM 输出**纯英文自然语言句子**（不加格式标记、不加代码块）
+- 参考项目根目录下的 4 份 spec 文档了解画风和角色模式的编写思路
+- 参考 `prompts/` 下的已有文件作为模板
+
 ## 日志
 
 所有步骤共用一份日志 `logs/audit_<画风>.csv`，每列对应一个处理阶段。跑完之后可以快速查看哪些图片需要重跑：
