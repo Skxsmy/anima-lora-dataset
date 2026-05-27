@@ -155,10 +155,11 @@ huggingface-cli download 1038lab/pixai-tagger \
 #     V1.1_onnx/model.onnx selected_tags.csv \
 #     --local-dir models/OppaiOracle/
 
-# 4. 配置 API Key
+# 4. 配置 API
 cp .env.example .env
-# 编辑 .env，填入你的 OpenRouter API Key
-# 从 https://openrouter.ai/keys 获取
+# 编辑 .env，填入 LLM_API_KEY
+# 可选：修改 LLM_API_BASE 和 LLM_MODEL
+# 支持任何 OpenAI 兼容接口（OpenRouter / OpenAI / 本地 vLLM 等）
 ```
 
 ### 处理数据集

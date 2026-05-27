@@ -29,18 +29,16 @@ from pathlib import Path
 # 共享日志工具
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.log_utils import load_log, write_log
-from lib.api_utils import load_prompt, get_api_key, resolve_prompt_path
+from lib.api_utils import load_prompt, get_api_key, resolve_prompt_path, get_api_base, get_model
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SUPPORTED_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 TIMEOUT = 80
 
-API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-MODEL = 'qwen/qwen3.6-35b-a3b'
 
 
 
-def generate_caption(image_path: Path, tags_text: str, api_key: str, system_prompt: str) -> str:
+def generate_caption(image_path: Path, tags_text: str, api_key: str, api_base: str, model: str, system_prompt: str) -> str:
     """调用 OpenRouter API 生成自然语言 caption"""
     with open(image_path, 'rb') as f:
         image_b64 = base64.b64encode(f.read()).decode()
@@ -51,7 +49,7 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str, system_prom
     user_content = f"Tags: {tags_text}\n\nGenerate a natural language caption for this image."
 
     payload = {
-        'model': MODEL,
+        'model': model,
         'messages': [
             {'role': 'system', 'content': system_prompt},
             {
@@ -68,7 +66,7 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str, system_prom
 
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
-        API_URL, data=data,
+        api_base + '/chat/completions', data=data,
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
@@ -108,8 +106,11 @@ def main():
 
     api_key = get_api_key(PROJECT_ROOT)
     if not api_key:
-        print("[错误] 未找到 API Key")
+        print("[错误] 未找到 API Key（请在 .env 中设置 LLM_API_KEY）")
         sys.exit(1)
+
+    api_base = get_api_base(PROJECT_ROOT)
+    model = get_model(PROJECT_ROOT)
 
     prompt_path = resolve_prompt_path(PROJECT_ROOT, 'caption_prompt', args.mode)
     system_prompt = load_prompt(prompt_path)
@@ -167,6 +168,7 @@ def main():
         print(f"需处理: {len(to_process)} 张")
     print(f"并发: {args.concurrency}, 超时: {TIMEOUT}s/张")
     print(f"Prompt: {prompt_path}")
+    print(f"API: {api_base} -- {model}")
     print(f"输出: {captions_dir}")
     print(f"{'='*60}\n")
 
@@ -212,7 +214,7 @@ def main():
                 raise FileNotFoundError(f"审计标签不存在: {audited_txt}")
             tags = audited_txt.read_text(encoding='utf-8').strip()
 
-            caption = generate_caption(img_path, tags, api_key, system_prompt)
+            caption = generate_caption(img_path, tags, api_key, api_base, model, system_prompt)
 
             if not caption:
                 raise ValueError("返回为空")

@@ -32,18 +32,56 @@ def resolve_prompt_path(project_root: Path, base_name: str, mode: str) -> Path:
     return path
 
 
+def _read_env(project_root: Path) -> dict:
+    """读取 .env 文件，返回 {KEY: value} 字典。"""
+    env = {}
+    env_path = project_root / '.env'
+    if not env_path.exists():
+        return env
+    for line in env_path.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, val = line.partition('=')
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if val:
+            env[key] = val
+    return env
+
+
 def get_api_key(project_root: Path) -> str:
-    """获取 OpenRouter API Key。
-    优先级：环境变量 OPENROUTER_API_KEY > 项目 .env 文件
+    """获取 API Key。
+    优先级：环境变量 LLM_API_KEY > .env 文件中的 LLM_API_KEY
     """
-    key = os.environ.get('OPENROUTER_API_KEY', '')
+    key = os.environ.get('LLM_API_KEY', '')
     if not key:
-        env_path = project_root / '.env'
-        if env_path.exists():
-            for line in env_path.read_text(encoding='utf-8').splitlines():
-                line = line.strip()
-                if line.startswith('OPENROUTER_API_KEY='):
-                    val = line.split('=', 1)[1].strip().strip('"').strip("'")
-                    if val and val != '请在此填入你的API Key':
-                        key = val
+        env = _read_env(project_root)
+        key = env.get('LLM_API_KEY', '')
     return key
+
+
+def get_api_base(project_root: Path) -> str:
+    """获取 API Base URL（不含 /chat/completions 后缀）。
+    优先级：环境变量 LLM_API_BASE > .env 文件 > 默认 OpenRouter
+    """
+    base = os.environ.get('LLM_API_BASE', '')
+    if not base:
+        env = _read_env(project_root)
+        base = env.get('LLM_API_BASE', '')
+    if not base:
+        base = 'https://openrouter.ai/api/v1'
+    return base.rstrip('/')
+
+
+def get_model(project_root: Path) -> str:
+    """获取模型名称。
+    优先级：环境变量 LLM_MODEL > .env 文件 > 默认 qwen/qwen3.6-35b-a3b
+    """
+    model = os.environ.get('LLM_MODEL', '')
+    if not model:
+        env = _read_env(project_root)
+        model = env.get('LLM_MODEL', '')
+    if not model:
+        model = 'qwen/qwen3.6-35b-a3b'
+    return model

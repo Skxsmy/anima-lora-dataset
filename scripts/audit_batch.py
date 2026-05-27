@@ -30,14 +30,11 @@ from pathlib import Path
 # 共享工具
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.log_utils import load_log, write_log, init_log
-from lib.api_utils import load_prompt, get_api_key, resolve_prompt_path
+from lib.api_utils import load_prompt, get_api_key, resolve_prompt_path, get_api_base, get_model
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SUPPORTED_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 TIMEOUT = 80
-
-API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-MODEL = 'qwen/qwen3.6-35b-a3b'
 
 
 # ============================================================
@@ -151,7 +148,8 @@ def get_image_name(image_path: Path) -> str:
 # ============================================================
 
 def process_one(image_path: Path, output_dir: Path, system_prompt: str,
-                api_key: str, trigger_word: str = '') -> dict:
+                api_key: str, api_base: str, model: str,
+                trigger_word: str = '') -> dict:
     """处理单张图片，返回结果字典。字段 audited='true' 表示成功。"""
     txt_path = image_path.parent / f"{image_path.stem}.txt"
     img_name = get_image_name(image_path)
@@ -181,7 +179,7 @@ def process_one(image_path: Path, output_dir: Path, system_prompt: str,
     mime = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}.get(ext, 'image/jpeg')
 
     payload = {
-        'model': MODEL,
+        'model': model,
         'messages': [
             {'role': 'system', 'content': system_prompt},
             {
@@ -198,7 +196,7 @@ def process_one(image_path: Path, output_dir: Path, system_prompt: str,
 
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
-        API_URL, data=data,
+        api_base + '/chat/completions', data=data,
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
@@ -268,8 +266,11 @@ def main():
 
     api_key = get_api_key(PROJECT_ROOT)
     if not api_key:
-        print("[错误] 未找到 API Key")
+        print("[错误] 未找到 API Key（请在 .env 中设置 LLM_API_KEY）")
         sys.exit(1)
+
+    api_base = get_api_base(PROJECT_ROOT)
+    model = get_model(PROJECT_ROOT)
 
     images_dir = PROJECT_ROOT / 'datasets' / args.dataset / 'images'
     if not images_dir.exists():
@@ -351,7 +352,7 @@ def main():
     print(f"并发: {args.concurrency}, 超时: {TIMEOUT}s/张")
     print(f"输出: {output_dir}")
     print(f"Prompt: {prompt_path}")
-    print(f"API: {MODEL}")
+    print(f"API: {api_base} -- {model}")
     print(f"{'='*60}\n")
 
     if len(to_process) == 0:
@@ -391,7 +392,7 @@ def main():
         with print_lock:
             write_log(results, log_file)
 
-        r = process_one(img_path, output_dir, system_prompt, api_key, trigger_word=args.trigger)
+        r = process_one(img_path, output_dir, system_prompt, api_key, api_base, model, trigger_word=args.trigger)
         elapsed = time.time() - t0
 
         if r.get('audited') == 'true':
