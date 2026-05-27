@@ -1,204 +1,135 @@
-# Anima LoRA 数据集准备管道
+# Anima LoRA 数据集准备工具
 
-画师画风 LoRA 的训练数据准备工具。从原始图片到可直接训练的 `merged/` 目录，一条龙。
+把原始图片变成 LoRA 训练数据。支持画风 LoRA 和角色 LoRA，通过切换模式适配不同的训练目标。
 
-## 一次完整的工作流长什么样
-
-以 cierra 画师为例（cierra-rabit 是自定义触发词）：
+## 安装
 
 ```bash
-# 1. 把图片丢进去就行
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+下载 PixAi Tagger 模型（必须）：
+
+```bash
+pip install huggingface-hub
+huggingface-cli download 1038lab/pixai-tagger \
+    pixai-tagger_v0.9.safetensors tags_v0.9_13k.json \
+    --local-dir models/PixelAI_tagger/
+```
+
+配置 API：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，至少填 `LLM_API_KEY`。如果你用 OpenAI 或其他兼容接口，顺便改 `LLM_API_BASE` 和 `LLM_MODEL`。
+
+| 变量 | 必填 | 默认值 |
+|------|------|--------|
+| `LLM_API_KEY` | 是 | |
+| `LLM_API_BASE` | 否 | `https://openrouter.ai/api/v1` |
+| `LLM_MODEL` | 否 | `qwen/qwen3.6-35b-a3b` |
+
+## 快速开始
+
+六步走完。以画风 LoRA 为例，触发词是 `cierra-rabit`：
+
+```bash
+# 1. 图片丢进 datasets/cierra/，脚本自动编号
 python scripts/process_raw.py --dataset cierra
 
-# 2. 检查分辨率，超大的等比缩到 1024px
+# 2. 检查分辨率，超大图等比缩到 1024px
 python scripts/check_resolution.py --dataset cierra
-python scripts/check_resolution.py --dataset cierra --apply   # 确认后执行缩放
+python scripts/check_resolution.py --dataset cierra --apply
 
-# 3. 自动打标（PixAi 识别画面内容，生成 Danbooru 标签）
+# 3. PixAi 自动打标
 python scripts/tag_images.py --dataset cierra --trigger "cierra-rabit"
 
-# 4. LLM 清理标签（去掉画师名、角色名、质量词、过细零件等）
+# 4. LLM 审查标签，删掉画师名、角色名、质量词等
 python scripts/audit_batch.py --dataset cierra --mode style --trigger cierra-rabit
 
-# 5. 生成自然语言描述（给每张图写至少两句英文 caption）
+# 5. 生成英文 caption（至少两句）
 python scripts/caption.py --dataset cierra --mode style
 
 # 6. 合成最终训练数据
 python scripts/merge_tags_captions.py --dataset cierra
 ```
 
-## 每步在做什么
+输出的 `datasets/cierra/merged/` 目录可以直接喂给训练脚本。
 
-### 1. 图片摄入 — `process_raw.py`
+## 每一步做了什么
 
-把原始图片丢进 `datasets/<画风>/` 目录里，脚本会自动把它们挪到 `raw/`、编号复制到 `images/`。
+### 1. process_raw.py
 
-```
-datasets/<画风>/           ← 你把图片丢这
-├── raw/                   ← 原始文件存档（自动创建）
-└── images/                ← 编号后的训练图片（自动创建）
-    ├── 000001.jpg
-    ├── 000002.jpg
-    └── ...
-```
+把原始图片编号复制到 `images/`。原始文件备份到 `raw/`。支持 jpg、png、webp。
 
-### 2. 分辨率检查 — `check_resolution.py`
+### 2. check_resolution.py
 
-扫描 `images/` 目录，报告每张图的分辨率。长边超过 1536px 的会建议缩放到 1024px。先用 `--apply` 看一眼报告，确认后再加 `--apply` 执行。
+扫描 `images/` 目录。长边超过 1536px 的等比缩到 1024px。短边小于 512px 的提醒你删除。先不加 `--apply` 看报告，确认后再执行。
 
-```
-[↓ 需缩放] 长边 > 1536px (3 张):
-  📏 000007.png  2048x1536 → 1024x768
-  📏 000012.png  2560x1440 → 1024x576
-  📏 000023.png  1920x1920 → 1024x1024
-```
+### 3. tag_images.py
 
-### 3. PixAi 打标 — `tag_images.py`
+用 PixAi Tagger 识别每张图的内容，生成 Danbooru 格式标签。每个 `.jpg` 旁边生成同名 `.txt`。标签不包含触发词。
 
-对每张图跑 PixAi Tagger，识别画面中的元素、动作、场景，输出 Danbooru 格式标签。每个 `.jpg` 旁边生成一个同名的 `.txt`。
+### 4. audit_batch.py
 
-```
-@cierra-rabit, 1girl, solo, upper_body, looking_at_viewer, bedroom, sitting, window_light
-```
+把 PixAi 标签发给 LLM 审查。LLM 会看图，删掉画师名、角色名、作品名、质量词、水印等不该出现的东西，只留下构图、动作、场景、服装大类。处理结果写入 `images_audited/`。
 
-### 4. LLM 审计 — `audit_batch.py`
+需要传 `--mode` 指定处理策略。需要传 `--trigger` 指定触发词。
 
-自动标签里有很多不该出现在画风 LoRA 里的东西。LLM 会检查每张图的实际画面，把下面这些清理掉：
+### 5. caption.py
 
-- 真实画师名（让自定义触发词专心绑定画风）
-- 具体角色名（不要让画风绑定到特定人物）
-- 作品/系列名
-- 质量词（masterpiece、best quality 等）
-- 平台水印、签名、文字残留
-- 过细的服装零件和身体部位
-- 明显识别错误的标签
+给每张图生成英文自然语言描述，至少两句。描述画面中实际看到的内容，不写画风词、不写剧情、不写 "The image shows" 这类引导句。
 
-留下的：主体、人数、构图、动作、场景、明显的服装大类、光照。
+同样需要 `--mode`。
 
-### 5. 句子 Caption — `caption.py`
+### 6. merge_tags_captions.py
 
-为每张图生成至少两句自然语言英文描述，描述画面中实际看到的内容。不写 "The image shows" 这类引导语，不谈剧情，不堆风格词。
+把审查后的标签和 caption 合并成一行，复制图片到 `merged/`。格式：
 
 ```
-Two blonde girls sit together against a white background. The girl on the left has blue eyes and wears a white dress with a red bow and frills, looking forward.
-```
-
-### 6. 合成训练数据 — `merge_tags_captions.py`
-
-把清理后的标签和句子 caption 合并为一行，同时复制图片到 `merged/`。这个目录里的内容可以直接喂给训练脚本。
-
-```
-@cierra-rabit, 2girls, cowboy_shot, sitting, looking_at_another, blonde_hair, long_hair.
+@cierra-rabit, 2girls, sitting, ...
 Two blonde girls sit together against a white background.
 ```
 
-## API 配置
+## 处理模式
 
-三个变量通过 `.env` 文件配置（`cp .env.example .env` 后编辑）：
+`audit_batch.py` 和 `caption.py` 通过 `--mode` 切换策略。不同模式对应 `prompts/` 下不同的 prompt 文件。
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `LLM_API_KEY` | 是 | — | API Key |
-| `LLM_API_BASE` | 否 | `https://openrouter.ai/api/v1` | API 地址（OpenAI 兼容） |
-| `LLM_MODEL` | 否 | `qwen/qwen3.6-35b-a3b` | 模型名称 |
+内置两种模式：
 
-支持任何 OpenAI 兼容接口，例如：
-- OpenRouter：`LLM_API_BASE=https://openrouter.ai/api/v1`
-- OpenAI：`LLM_API_BASE=https://api.openai.com/v1`，`LLM_MODEL=gpt-4o`
-- 本地 vLLM：`LLM_API_BASE=http://localhost:8000/v1`
+| 模式 | 用途 | 区别 |
+|------|------|------|
+| `style` | 画风 LoRA | 删角色名和画师名，保留构图场景光照 |
+| `character` | 角色 LoRA | 保留瞳色发色配饰等角色特征，每张图按实际发型服装写 |
 
-## 处理模式（Mode）
+### 自定义模式
 
-`audit_batch.py` 和 `caption.py` 通过 `--mode` 参数切换处理策略。不同模式对应 `prompts/` 下不同的 prompt 文件，决定 LLM 如何处理标签和生成 caption。
-
-### 内置模式
-
-| 模式 | 用途 | 审计重点 | Caption 风格 |
-|------|------|---------|-------------|
-| `style` | 画师画风 LoRA | 删角色名/画师名/作品名，保留构图/场景/光照 | 纯自然语言，不写触发词，不写引导句 |
-| `character` | 人物角色 LoRA | 保留角色核心特征（瞳色/发色/配饰），按图片实际保留发型和服装 | 描述角色特征+外观+姿态+场景，至少 2 句 |
-
-### 添加自定义模式
-
-如果你想训练其他类型的 LoRA（如服装、场景、道具），可以添加自己的模式。只需在 `prompts/` 下创建两个文件：
+在 `prompts/` 下创建两个文件：
 
 ```
-prompts/tagger_audit_prompt_<mode>.md    ← LLM 审计标签用
-prompts/caption_prompt_<mode>.md         ← LLM 生成 caption 用
+prompts/tagger_audit_prompt_<你的模式名>.md
+prompts/caption_prompt_<你的模式名>.md
 ```
 
-**文件命名规则：** `prompts/<脚本基名>_<mode>.md`。`--mode my_mode` 会查找 `tagger_audit_prompt_my_mode.md` 和 `caption_prompt_my_mode.md`。找不到对应文件会直接报错退出。
+然后用 `--mode 你的模式名` 即可。文件不存在会报错退出。
 
-**编写 prompt 的注意事项：**
-- `audit_batch.py` 期望 LLM 输出**纯逗号分隔标签**（不加触发词、不加解释）
-- `caption.py` 期望 LLM 输出**纯英文自然语言句子**（不加格式标记、不加代码块）
-- 参考项目根目录下的 4 份 spec 文档了解画风和角色模式的编写思路
-- 参考 `prompts/` 下的已有文件作为模板
+Prompt 文件的输出要求：
+
+- 审计 prompt：LLM 必须输出纯逗号分隔标签，不加触发词，不加解释
+- Caption prompt：LLM 必须输出纯英文句子，不加格式标记
+
+参考 `prompts/` 下已有的四个文件来写。
 
 ## 日志
 
-所有步骤共用一份日志 `logs/audit_<画风>.csv`，每列对应一个处理阶段。跑完之后可以快速查看哪些图片需要重跑：
+每个数据集有一份日志 `logs/audit_<数据集名>.csv`，记录了每张图在每个步骤的处理状态。想重跑某张图，在 CSV 里把对应的 `needs_reaudit` 或 `needs_recaption` 改成 `true` 再跑脚本，脚本只处理标记了的图片。
+
+初始化或同步日志：
 
 ```bash
-# 查看有多少图需要重新生成 caption
-grep -c "needs_recaption,true" logs/audit_cierra.csv
-
-# 查看 caption 长度异常的图（过短）
-awk -F, '$11 < 20 && $11 > 0' logs/audit_cierra.csv
-```
-
-## 从头开始一个新数据集
-
-### 环境准备（仅第一次）
-
-```bash
-# 1. 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate
-
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 下载模型文件（二选一，PixAi Tagger 必须）
-pip install huggingface-hub
-huggingface-cli download 1038lab/pixai-tagger \
-    pixai-tagger_v0.9.safetensors tags_v0.9_13k.json \
-    --local-dir models/PixelAI_tagger/
-
-# OppaiOracle 是可选的补充 tagger
-# huggingface-cli download Grio43/OppaiOracle \
-#     V1.1_onnx/model.onnx selected_tags.csv \
-#     --local-dir models/OppaiOracle/
-
-# 4. 配置 API
-cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY
-# 可选：修改 LLM_API_BASE 和 LLM_MODEL
-# 支持任何 OpenAI 兼容接口（OpenRouter / OpenAI / 本地 vLLM 等）
-```
-
-### 处理数据集
-
-```bash
-# 1. 丢图片进去
-python scripts/process_raw.py --dataset 新画风
-# → 提示"没有图片"，脚本已经建好目录了
-# → 把图片复制到 datasets/新画风/ 里
-# → 再跑一次 process_raw.py
-
-# 2. 检查分辨率（超大图缩到 1024px）
-python scripts/check_resolution.py --dataset 新画风
-python scripts/check_resolution.py --dataset 新画风 --apply
-
-# 3. 自动打标
-python scripts/tag_images.py --dataset 新画风 --trigger "my_trigger"
-
-# 4. LLM 审计标签（--mode style 画风 / character 角色）
-python scripts/audit_batch.py --dataset 新画风 --mode style --trigger my_trigger
-
-# 5. 生成句子 caption
-python scripts/caption.py --dataset 新画风 --mode style
-
-# 6. 合成训练数据
-python scripts/merge_tags_captions.py --dataset 新画风
+python scripts/audit_batch.py --dataset 数据集名 --init
 ```
