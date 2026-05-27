@@ -248,7 +248,7 @@ def process_one(image_path: Path, output_dir: Path, system_prompt: str,
 def main():
     parser = argparse.ArgumentParser(description='批量并发审计 Tagger 标签')
     parser.add_argument('--dataset', required=True, help='数据集名称')
-    parser.add_argument('--mode', required=True,
+    parser.add_argument('--mode', required=False, default=None,
                         help='处理模式 (如 style, character)。对应 prompts/<脚本>_<mode>.md')
     parser.add_argument('--output', help='输出目录（默认: datasets/角色名/images_audited/）')
     parser.add_argument('--concurrency', type=int, default=10, help='并发数（默认: 10）')
@@ -263,6 +263,10 @@ def main():
     parser.add_argument('--init', action='store_true',
                         help='仅初始化/更新日志文件后退出')
     args = parser.parse_args()
+
+    # --init 模式不需要 --mode
+    if not args.init and not args.mode:
+        parser.error('非 --init 模式必须提供 --mode')
 
     api_key = get_api_key(PROJECT_ROOT)
     if not api_key:
