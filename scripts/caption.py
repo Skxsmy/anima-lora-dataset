@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
 """
-Step 6: 自然语言 Caption 生成
+自然语言 Caption 生成。
 读取已审计的标签和图片，生成自然语言描述存入 captions/ 子目录。
 
 运行逻辑:
-  1. 读取日志 (audit_<dataset>.csv)，获取已审计图片列表
-  2. 检查 captions/ 中是否已有输出
-  3. --skip（默认）跳过已有 caption 的图片；--no-skip 强制重跑
-  4. 并发调用 OpenRouter API 生成自然语言描述
-  5. 输出写入 datasets/<角色名>/captions/
-  6. 日志中维护 needs_caption 字段
+  1. 读取日志 (audit_<dataset>.csv)
+  2. --skip（默认）跳过 captioned=true 且 needs_recaption=false 的图片
+  3. 并发调用 OpenRouter API 生成自然语言描述
+  4. 输出写入 datasets/<角色名>/captions/
 
 用法:
-  python scripts/caption.py --dataset cierra
-  python scripts/caption.py --dataset cierra --start-from 50 --limit 10
-  python scripts/caption.py --dataset cierra --no-skip         # 全部重跑
+  python scripts/caption.py --dataset cierra --mode style
+  python scripts/caption.py --dataset cierra --mode style --start-from 50 --limit 10
+  python scripts/caption.py --dataset cierra --mode style --no-skip
 """
 
 import argparse
 import base64
 import json
-import os
 import sys
 import time
 import urllib.request
@@ -31,7 +28,8 @@ from pathlib import Path
 
 # 共享日志工具
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib.log_utils import load_log, write_log, LOG_COLS
+from lib.log_utils import load_log, write_log
+from lib.api_utils import load_prompt, get_api_key, resolve_prompt_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SUPPORTED_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
@@ -40,33 +38,9 @@ TIMEOUT = 80
 API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 MODEL = 'qwen/qwen3.6-35b-a3b'
 
-PROMPT_PATH = PROJECT_ROOT / 'prompts' / 'caption_prompt.md'
 
 
-def load_prompt() -> str:
-    return PROMPT_PATH.read_text(encoding='utf-8').strip()
-
-
-def get_api_key():
-    key = os.environ.get('OPENROUTER_API_KEY', '')
-    if not key:
-        env_path = PROJECT_ROOT / '.env'
-        if env_path.exists():
-            for line in env_path.read_text(encoding='utf-8').splitlines():
-                line = line.strip()
-                if line.startswith('OPENROUTER_API_KEY='):
-                    val = line.split('=', 1)[1].strip().strip('"').strip("'")
-                    if val and val != '请在此填入你的API Key':
-                        key = val
-    return key
-
-
-# ============================================================
-# 日志管理 — 使用 scripts/lib/log_utils.py 中的 load_log / write_log
-# ============================================================
-
-
-def generate_caption(image_path: Path, tags_text: str, api_key: str) -> str:
+def generate_caption(image_path: Path, tags_text: str, api_key: str, system_prompt: str) -> str:
     """调用 OpenRouter API 生成自然语言 caption"""
     with open(image_path, 'rb') as f:
         image_b64 = base64.b64encode(f.read()).decode()
@@ -79,7 +53,7 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str) -> str:
     payload = {
         'model': MODEL,
         'messages': [
-            {'role': 'system', 'content': load_prompt()},
+            {'role': 'system', 'content': system_prompt},
             {
                 'role': 'user',
                 'content': [
@@ -108,7 +82,6 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str) -> str:
         msg = body.get('choices', [{}])[0].get('message', {})
         caption = (msg.get('content') or '').strip()
 
-        # reasoning model: content 是最终答案，reasoning 是思考过程（忽略）
         if not caption or len(caption) < 10:
             return ''
 
@@ -122,6 +95,8 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description='自然语言 Caption 生成')
     parser.add_argument('--dataset', required=True, help='数据集名称')
+    parser.add_argument('--mode', required=True,
+                        help='处理模式 (如 style, character)。对应 prompts/<脚本>_<mode>.md')
     parser.add_argument('--concurrency', type=int, default=10, help='并发数')
     parser.add_argument('--start-from', type=int, default=1, help='起始编号')
     parser.add_argument('--limit', type=int, default=0, help='处理张数（0=全部）')
@@ -131,17 +106,19 @@ def main():
                         help='忽略已有 caption，全部重跑')
     args = parser.parse_args()
 
-    api_key = get_api_key()
+    api_key = get_api_key(PROJECT_ROOT)
     if not api_key:
         print("[错误] 未找到 API Key")
         sys.exit(1)
+
+    prompt_path = resolve_prompt_path(PROJECT_ROOT, 'caption_prompt', args.mode)
+    system_prompt = load_prompt(prompt_path)
 
     images_dir = PROJECT_ROOT / 'datasets' / args.dataset / 'images'
     audited_dir = images_dir.parent / 'images_audited'
     captions_dir = images_dir.parent / 'captions'
     log_file = PROJECT_ROOT / 'logs' / f'audit_{args.dataset}.csv'
 
-    # === 1. 获取全部图片 ===
     if not images_dir.exists():
         print(f"[错误] 图片目录不存在: {images_dir}")
         sys.exit(1)
@@ -168,19 +145,18 @@ def main():
     log_entries = load_log(log_file)
 
     # === 3. 过滤 ===
-    if args.skip:
+    if args.skip and log_entries:
         before = len(to_process)
         to_process = [f for f in to_process
-                      if not (captions_dir / f"{f.stem}.txt").exists()
-                      or (log_entries.get(f.name, {}).get('needs_caption', 'false') == 'true')
-                      or (log_entries.get(f.name, {}).get('needs_recaption', 'false') == 'true')]
+                      if log_entries.get(f.name, {}).get('captioned', 'false') != 'true'
+                      or log_entries.get(f.name, {}).get('needs_recaption', 'false') == 'true']
         skipped = before - len(to_process)
     else:
         skipped = 0
 
     # === 4. 概览 ===
     print(f"{'='*60}")
-    print(f"Caption 生成: {args.dataset}")
+    print(f"Caption 生成: {args.dataset}  (mode={args.mode})")
     print(f"日志: {log_file} ({'已读' if log_entries else '无'})")
     print(f"范围: {all_images[start_idx].stem} ~ {all_images[end_idx-1].stem} ({end_idx-start_idx} 张)")
     if args.skip:
@@ -190,6 +166,7 @@ def main():
     if to_process:
         print(f"需处理: {len(to_process)} 张")
     print(f"并发: {args.concurrency}, 超时: {TIMEOUT}s/张")
+    print(f"Prompt: {prompt_path}")
     print(f"输出: {captions_dir}")
     print(f"{'='*60}\n")
 
@@ -202,11 +179,9 @@ def main():
     start_time = time.time()
     results: dict[str, dict] = {}
 
-    # 预填入日志中的成功条目（这样 log_write 始终包含完整记录）
-    if args.skip:
-        for img_name, entry in log_entries.items():
-            if entry['status'] == 'success':
-                results[img_name] = dict(entry)
+    # 预填入所有日志条目（保持日志完整，避免 write_log 覆写时丢失数据）
+    for img_name, entry in log_entries.items():
+        results[img_name] = dict(entry)
 
     success = 0
     failed = 0
@@ -222,41 +197,37 @@ def main():
         entry.update({
             'image': img_name,
             'timestamp': datetime.now().isoformat(),
-            'status': 'processing',
-            'error': '',
-            'needs_caption': 'false',
+            'captioned': 'false',
             'needs_recaption': 'false',
             'caption_length': 0,
+            'error': '',
         })
         results[img_name] = entry
         with print_lock:
             write_log(results, log_file)
 
         try:
-            # 读取已审计标签
             audited_txt = audited_dir / f"{img_path.stem}.txt"
             if not audited_txt.exists():
                 raise FileNotFoundError(f"审计标签不存在: {audited_txt}")
             tags = audited_txt.read_text(encoding='utf-8').strip()
 
-            # 生成 caption
-            caption = generate_caption(img_path, tags, api_key)
+            caption = generate_caption(img_path, tags, api_key, system_prompt)
 
             if not caption:
                 raise ValueError("返回为空")
 
-            # 保存 caption
             out_path = captions_dir / f"{img_path.stem}.txt"
             out_path.write_text(caption + '\n', encoding='utf-8')
 
-            entry['status'] = 'success'
+            entry['captioned'] = 'true'
             entry['error'] = ''
             elapsed = time.time() - t0
             word_count = len(caption.split())
             icon = '✅'
 
         except Exception as e:
-            entry['status'] = 'failed'
+            entry['captioned'] = 'false'
             entry['error'] = str(e)[:100]
             elapsed = time.time() - t0
             word_count = 0
@@ -266,12 +237,12 @@ def main():
             wc_str = f"{word_count}w" if word_count else ""
             print(f"  {icon} {img_name:15s} {wc_str:>6}  ({elapsed:.0f}s)  {entry['error']}")
             entry['timestamp'] = datetime.now().isoformat()
-            entry['needs_caption'] = 'false'
+            entry['needs_recaption'] = 'false'
             entry['caption_length'] = word_count
             results[img_name] = entry
             write_log(results, log_file)
 
-        if entry['status'] == 'success':
+        if entry['captioned'] == 'true':
             success += 1
         else:
             failed += 1
