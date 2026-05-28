@@ -61,7 +61,7 @@ def generate_caption(image_path: Path, tags_text: str, api_key: str, api_base: s
             }
         ],
         'temperature': 0.3,
-        'max_tokens': 2048,
+        'max_tokens': 4096,
     }
 
     data = json.dumps(payload).encode('utf-8')

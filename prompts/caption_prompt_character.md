@@ -45,6 +45,22 @@
 
 **多发型/多服装角色：** 同一角色可能有不同发型和不同服装，caption 必须按当前图片实际内容写，不要统一成默认形象。
 
+### 多人/局部他人 Caption 写法
+
+当图片中有超过 1 个人物时，caption 必须准确反映人数关系。**绝不能将多人或局部他人图描述为 solo 场景。**
+
+核心原则：
+- 目标角色始终是描述的主体。用 `main character` / `target character` 定位目标角色。
+- 另一人只有局部（手、手臂、身体边缘，无脸）时，明确写出 `another person's hand` / `partial arm` / `partial body visible at the edge`。
+- 两人有明显互动时，准确描述互动类型（`hugging`、`holding hands`、`leaning against`），同时保持目标角色为描述主体。
+- 绝不写 `a girl standing alone`、`solo` 等暗示只有一人的描述——如果图里不是 solo。
+
+描述结构（有多人时）：
+
+- 第 1 句：目标角色核心特征 + 当前外观 + 另一人的存在/互动关系
+- 第 2 句：目标角色姿态、构图 + 另一人的位置/范围
+- 第 3 句（可选）：背景与场景
+
 ---
 
 ## 示例
@@ -69,9 +85,24 @@ A girl with blue eyes and long silver hair wears casual clothes. She sits on a b
 A girl with blue eyes and a ponytail wears a battle outfit. She runs across an open field, holding a sword in one hand. Her expression is serious and focused.
 ```
 
-### 多人图
+### 双人图（目标角色为主体）
 ```
-Two girls stand together on a city street at night. They are both smiling and facing the viewer, wearing casual winter coats. Neon signs and streetlights illuminate the scene from behind.
+A girl with blue eyes and short silver hair is the main character in the foreground. Another girl stands beside her, partially visible at the right edge. Both are on a city street at night with neon signs in the background.
+```
+
+### 局部他人 — 只有手入镜（轻微接触）
+```
+A girl with blue eyes and short silver hair wears a school uniform. Another person's hand is visible on her shoulder, but no face is shown. She is viewed from the upper body, looking toward the viewer with a gentle smile.
+```
+
+### 局部他人 — 手臂/身体边缘
+```
+A girl with red eyes and black hair is the main character in the foreground. A partial arm of another person is visible at the left edge of the frame, no face shown. The target character sits at a desk in a classroom, looking down at a book.
+```
+
+### 双人互动 — 牵手（谨慎保留的图）
+```
+A girl with blue eyes and long silver hair is the main character, holding hands with another person partially visible at the frame edge. She wears casual clothes and looks at the viewer with a calm expression. The background shows a park with soft afternoon light.
 ```
 
 ### 近景头像
