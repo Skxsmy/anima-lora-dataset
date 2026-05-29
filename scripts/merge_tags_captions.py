@@ -15,6 +15,7 @@ Step 7: 合成 Tag + Caption，准备训练数据
 用法：
   python scripts/merge_tags_captions.py --dataset cierra
   python scripts/merge_tags_captions.py --dataset cierra --dry-run    # 只显示，不写入
+  python scripts/merge_tags_captions.py --dataset cierra --webp-to-png  # webp 转 png
 """
 
 import argparse
@@ -22,6 +23,8 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from PIL import Image
 
 # 共享日志工具
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,6 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description='合成 Tag + Caption')
     parser.add_argument('--dataset', required=True, help='数据集名称')
     parser.add_argument('--dry-run', action='store_true', help='只预览，不实际写入')
+    parser.add_argument('--webp-to-png', action='store_true', help='webp 图片无损转换为 png')
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -126,9 +130,13 @@ def main():
         # 写入 merged txt
         (merged_dir / f'{stem}.txt').write_text(merged_text + '\n', encoding='utf-8')
 
-        # 复制图片
+        # 复制/转换图片
         img_path = images_dir / f'{stem}{Path(img_filename).suffix}'
-        shutil.copy2(img_path, merged_dir / f'{stem}{img_path.suffix}')
+        if args.webp_to_png and img_path.suffix.lower() == '.webp':
+            dst = merged_dir / f'{stem}.png'
+            Image.open(img_path).save(dst, 'PNG')
+        else:
+            shutil.copy2(img_path, merged_dir / f'{stem}{img_path.suffix}')
 
         # 更新日志
         entry.update({
