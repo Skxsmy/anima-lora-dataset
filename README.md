@@ -49,7 +49,7 @@ python scripts/check_resolution.py --dataset cierra --apply
 python scripts/tag_images.py --dataset cierra --trigger "cierra-rabit"
 
 # 4. LLM 审查标签，删掉画师名、角色名、质量词等
-python scripts/audit_batch.py --dataset cierra --mode style --trigger cierra-rabit
+python scripts/audit_batch.py --dataset cierra --mode style --trigger "cierra-rabit"
 
 # 5. 生成英文 caption（至少两句）
 python scripts/caption.py --dataset cierra --mode style
@@ -59,6 +59,16 @@ python scripts/merge_tags_captions.py --dataset cierra
 ```
 
 输出的 `datasets/cierra/merged/` 目录可以直接喂给训练脚本。
+
+### 角色 LoRA 示例
+
+角色 LoRA 的触发词通常不含 `@`，如 `alice_cierra`：
+
+```bash
+python scripts/audit_batch.py --dataset "alice(cierra-rabit)" --mode character --trigger "alice_cierra" --shuffle
+```
+
+`--trigger` 传入什么就原样写入文件，不做任何自动加工（不会自动加 `@`）。
 
 ## 每一步做了什么
 
@@ -78,7 +88,17 @@ python scripts/merge_tags_captions.py --dataset cierra
 
 把 PixAi 标签发给 LLM 审查。LLM 会看图，删掉画师名、角色名、作品名、质量词、水印等不该出现的东西，只留下构图、动作、场景、服装大类。处理结果写入 `images_audited/`。
 
-需要传 `--mode` 指定处理策略。需要传 `--trigger` 指定触发词。
+需要传 `--mode` 指定处理策略。需要传 `--trigger` 指定触发词（原样写入，不自动加 `@`）。
+
+可选参数：
+
+| 参数 | 作用 |
+|------|------|
+| `--shuffle` | 注入触发词前随机打乱所有标签顺序 |
+| `--no-skip` | 忽略日志，强制全部重跑 |
+| `--start-from N` | 从第 N 张开始 |
+| `--limit N` | 只处理 N 张 |
+| `--concurrency N` | 并发数（默认 10） |
 
 ### 5. caption.py
 

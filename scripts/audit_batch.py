@@ -9,15 +9,16 @@
   4. 并发处理缺失图片，每完成一张更新日志（合并新旧记录，覆写排序）
 
 用法:
-  python scripts/audit_batch.py --dataset cierra --mode style --trigger cierra-rabit
-  python scripts/audit_batch.py --dataset cierra --mode style --trigger cierra-rabit --start-from 101 --limit 100
-  python scripts/audit_batch.py --dataset cierra --mode style --trigger cierra-rabit --no-skip
+  python scripts/audit_batch.py --dataset cierra --mode style --trigger "@cierra-rabit"
+  python scripts/audit_batch.py --dataset cierra --mode style --trigger "@cierra-rabit" --start-from 101 --limit 100
+  python scripts/audit_batch.py --dataset cierra --mode style --trigger "@cierra-rabit" --no-skip
   python scripts/audit_batch.py --dataset cierra --init                    # 仅初始化日志
 """
 
 import argparse
 import base64
 import json
+import random
 import re
 import sys
 import time
@@ -68,8 +69,7 @@ def _extract_clean_tags(content: str, reasoning: str, trigger_word: str = '') ->
             if looks_clean(bt):
                 return bt
         if trigger_word:
-            trigger = f'@{trigger_word}'
-            idx = t.rfind(trigger)
+            idx = t.rfind(trigger_word)
             if idx >= 0:
                 tail = t[idx:].split('\n')[0].strip()
                 if looks_clean(tail):
@@ -149,7 +149,7 @@ def get_image_name(image_path: Path) -> str:
 
 def process_one(image_path: Path, output_dir: Path, system_prompt: str,
                 api_key: str, api_base: str, model: str,
-                trigger_word: str = '') -> dict:
+                trigger_word: str = '', shuffle_tags: bool = False) -> dict:
     """处理单张图片，返回结果字典。字段 audited='true' 表示成功。"""
     txt_path = image_path.parent / f"{image_path.stem}.txt"
     img_name = get_image_name(image_path)
@@ -217,13 +217,19 @@ def process_one(image_path: Path, output_dir: Path, system_prompt: str,
                 result['error'] = 'no_clean_tags_in_response'
                 return result
 
-            # LLM 输出不含触发词，脚本统一在前面添加
-            answer = f"@{trigger_word}, {answer}"
+            # 随机打乱标签顺序（在注入触发词之前）
+            if shuffle_tags:
+                tags = [t.strip() for t in answer.split(',') if t.strip()]
+                random.shuffle(tags)
+                answer = ', '.join(tags)
+
+            # 在 LLM 输出前面添加用户指定的触发词
+            answer = f"{trigger_word}, {answer}"
 
             output_dir.mkdir(parents=True, exist_ok=True)
             out_path = output_dir / f"{image_path.stem}.txt"
             out_path.write_text(answer + '\n', encoding='utf-8')
-            new_count = len([t for t in answer.split(', ') if t.strip() and not t.startswith('@')])
+            new_count = len([t for t in answer.split(', ') if t.strip() and t.strip() != trigger_word.strip()])
             result['new_count'] = new_count
             result['audited'] = 'true'
             return result
@@ -259,7 +265,9 @@ def main():
     parser.add_argument('--no-skip', dest='skip', action='store_false',
                         help='忽略日志，强制重跑')
     parser.add_argument('--trigger', required=False,
-                        help='画风触发词（如 rurudo），脚本自动加 @ 前缀')
+                        help='触发词，原样插入（如 @cierra-rabit）')
+    parser.add_argument('--shuffle', action='store_true', default=False,
+                        help='在注入触发词之前随机打乱标签顺序')
     parser.add_argument('--init', action='store_true',
                         help='仅初始化/更新日志文件后退出')
     args = parser.parse_args()
@@ -396,7 +404,7 @@ def main():
         with print_lock:
             write_log(results, log_file)
 
-        r = process_one(img_path, output_dir, system_prompt, api_key, api_base, model, trigger_word=args.trigger)
+        r = process_one(img_path, output_dir, system_prompt, api_key, api_base, model, trigger_word=args.trigger, shuffle_tags=args.shuffle)
         elapsed = time.time() - t0
 
         if r.get('audited') == 'true':
